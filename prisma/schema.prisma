@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator client_frontend {
+  provider = "prisma-client-js"
+  output   = "../../frontend/node_modules/.prisma/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// NextAuth Models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Application Models
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt @default(now())
+  lastSeen      DateTime  @default(now())
+  role          String    @default("USER") // USER, MODERATOR, ADMIN
+  plan          String    @default("FREE") // FREE, PREMIUM, PREMIUM_PLUS
+
+  accounts         Account[]
+  sessions         Session[]
+  hostedRooms      Room[]            @relation("HostRelation")
+  roomParticipants RoomParticipant[]
+  playlists        Playlist[]
+  history          History[]
+  reportsMade      Report[]          @relation("ReporterRelation")
+  reportsReceived  Report[]          @relation("ReportedRelation")
+}
+
+model Room {
+  id        String   @id @default(uuid())
+  roomCode  String   @unique
+  hostId    String
+  roomName  String
+  roomType  String   // "private" | "public" | "solo"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  host         User              @relation("HostRelation", fields: [hostId], references: [id], onDelete: Cascade)
+  participants RoomParticipant[]
+  queue        Queue[]
+  reports      Report[]
+
+  @@index([hostId])
+  @@index([isActive])
+}
+
+model RoomParticipant {
+  id       String   @id @default(uuid())
+  roomId   String
+  userId   String
+  joinedAt DateTime @default(now())
+  isMuted  Boolean  @default(true)
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([userId])
+}
+
+model Song {
+  id         String   @id @default(uuid())
+  title      String
+  artist     String
+  duration   Int      // in seconds
+  coverImage String
+  audioUrl   String
+
+  playlistSongs PlaylistSong[]
+  history       History[]
+  queues        Queue[]
+}
+
+model Queue {
+  id          String @id @default(uuid())
+  roomId      String
+  songId      String
+  addedBy     String // userId
+  orderNumber Int
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([songId])
+}
+
+model Playlist {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  songs PlaylistSong[]
+
+  @@index([userId])
+}
+
+model PlaylistSong {
+  id         String @id @default(uuid())
+  playlistId String
+  songId     String
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song     Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@index([playlistId])
+  @@index([songId])
+}
+
+model History {
+  id       String   @id @default(uuid())
+  userId   String
+  songId   String
+  playedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([songId])
+  @@index([playedAt])
+}
+
+model Report {
+  id          String   @id @default(uuid())
+  reporterId  String
+  reportedId  String
+  roomId      String?
+  reason      String
+  status      String   @default("PENDING") // PENDING, REVIEWED, RESOLVED
+  createdAt   DateTime @default(now())
+
+  reporter User  @relation("ReporterRelation", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User  @relation("ReportedRelation", fields: [reportedId], references: [id], onDelete: Cascade)
+  room     Room? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([reporterId])
+  @@index([reportedId])
+  @@index([roomId])
+}
+
