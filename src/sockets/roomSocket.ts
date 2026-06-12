@@ -12,6 +12,56 @@ export function setupRoomSockets(io: SocketIOServer) {
 
       socket.join(roomId);
       
+      // Ensure the room exists in the database so that relation constraints (like WatchSession) succeed
+      try {
+        const roomExists = await prisma.room.findUnique({
+          where: { id: roomId }
+        });
+        if (!roomExists) {
+          const hostUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { id: userId },
+                { email: userId }
+              ]
+            }
+          });
+          const actualHostId = hostUser ? hostUser.id : userId;
+          
+          let finalHostId = actualHostId;
+          if (!hostUser) {
+            const anyUser = await prisma.user.findFirst();
+            if (anyUser) {
+              finalHostId = anyUser.id;
+            } else {
+              const fallbackUser = await prisma.user.create({
+                data: {
+                  name: 'System User',
+                  email: 'system@musiclive.com',
+                  role: 'USER',
+                  plan: 'FREE'
+                }
+              });
+              finalHostId = fallbackUser.id;
+            }
+          }
+
+          await prisma.room.create({
+            data: {
+              id: roomId,
+              roomCode: roomId.replace('room-', '').substring(0, 8).toUpperCase(),
+              hostId: finalHostId,
+              roomName: userName ? `${userName}'s Party` : 'Watch Party',
+              roomType: 'private',
+              isActive: true,
+            }
+          });
+          console.log(`🏠 Auto-created Room record in DB for room ID: ${roomId} with Host: ${finalHostId}`);
+        }
+      } catch (err) {
+        console.error('Error auto-creating Room record:', err);
+      }
+      
       // Store socket to userId mapping for disconnects
       (socket as any).userId = userId;
       (socket as any).roomId = roomId;
@@ -63,6 +113,16 @@ export function setupRoomSockets(io: SocketIOServer) {
     socket.on('speaking', (data: { roomId: string; userId: string; isSpeaking: boolean }) => {
       const { roomId, userId, isSpeaking } = data;
       socket.to(roomId).emit('speaking', { userId, isSpeaking });
+    });
+
+    // Real-time Chat Messages
+    socket.on('chat:message', (data: { roomId: string; message: any }) => {
+      io.to(data.roomId).emit('chat:message', data.message);
+    });
+
+    // Real-time Typing Indicator
+    socket.on('chat:typing', (data: { roomId: string; userId: string; userName: string; isTyping: boolean }) => {
+      socket.to(data.roomId).emit('chat:typing', data);
     });
 
     // Disconnect handler

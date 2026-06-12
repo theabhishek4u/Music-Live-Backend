@@ -29,7 +29,7 @@ export const deletePlaylist = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await prisma.playlist.delete({
-      where: { id }
+      where: { id: id as string }
     });
     res.json({ success: true });
   } catch (error) {

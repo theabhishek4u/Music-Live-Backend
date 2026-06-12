@@ -14,6 +14,7 @@ import { adminRouter } from './routes/admin';
 import { reportsRouter } from './routes/reports';
 import { setupRoomSockets } from './sockets/roomSocket';
 import { setupSyncSockets } from './sockets/syncSocket';
+import { setupYoutubeSockets } from './sockets/youtubeSocket';
 import { setupSignaling } from './webrtc/rtc';
 
 dotenv.config();
@@ -68,6 +69,7 @@ app.use('/api/reports', reportsRouter);
 // Socket.io handlers
 setupRoomSockets(io);
 setupSyncSockets(io);
+setupYoutubeSockets(io);
 setupSignaling(io);
 
 // Start server

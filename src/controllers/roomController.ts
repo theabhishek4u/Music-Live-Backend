@@ -92,7 +92,7 @@ export const getRoomDetails = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const room = await prisma.room.findUnique({
-      where: { id },
+      where: { id: id as string },
       include: {
         host: true,
         participants: {
