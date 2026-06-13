@@ -76,8 +76,8 @@ export function setupRoomSockets(io: SocketIOServer) {
         console.error('Error auto-creating/activating Room record:', err);
       }
       
-      // Store socket to userId mapping for disconnects
-      (socket as any).userId = userId;
+      // Store socket to userId mapping for disconnects (use resolved dbUserId if available)
+      (socket as any).userId = dbUserId || userId;
       (socket as any).roomId = roomId;
       (socket as any).userName = userName;
       (socket as any).userImage = userImage;
@@ -120,14 +120,23 @@ export function setupRoomSockets(io: SocketIOServer) {
 
       // Send the current list of members to the joined user
       const sockets = await io.in(roomId).fetchSockets();
-      const members = sockets.map(s => ({
-        userId: (s as any).userId,
-        userName: (s as any).userName,
-        userImage: (s as any).userImage,
-        isMuted: false,
-        isHost: false,
-        isSpeaking: false
-      })).filter(m => m.userId);
+      const membersMap = new Map<string, any>();
+      
+      sockets.forEach(s => {
+        const uId = (s as any).userId;
+        if (uId && !membersMap.has(uId)) {
+          membersMap.set(uId, {
+            userId: uId,
+            userName: (s as any).userName,
+            userImage: (s as any).userImage,
+            isMuted: false,
+            isHost: false,
+            isSpeaking: false
+          });
+        }
+      });
+      
+      const members = Array.from(membersMap.values());
       
       socket.emit('room:members', members);
     });
