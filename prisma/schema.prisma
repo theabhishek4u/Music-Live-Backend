@@ -74,6 +74,7 @@ model User {
   history          History[]
   reportsMade      Report[]          @relation("ReporterRelation")
   reportsReceived  Report[]          @relation("ReportedRelation")
+  roomVisits       RoomVisit[]
 }
 
 model Room {
@@ -90,6 +91,7 @@ model Room {
   queue        Queue[]
   reports      Report[]
   watchSession WatchSession?
+  roomVisits   RoomVisit[]
 
   @@index([hostId])
   @@index([isActive])
@@ -203,6 +205,20 @@ model WatchSession {
 
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
+  @@index([roomId])
+}
+
+model RoomVisit {
+  id        String   @id @default(uuid())
+  userId    String
+  roomId    String
+  visitedAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roomId])
+  @@index([userId])
   @@index([roomId])
 }
 

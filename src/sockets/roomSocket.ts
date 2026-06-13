@@ -12,24 +12,32 @@ export function setupRoomSockets(io: SocketIOServer) {
 
       socket.join(roomId);
       
+      // Resolve user from DB first
+      let dbUserId: string | null = null;
+      try {
+        const dbUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { id: userId },
+              { email: userId }
+            ]
+          }
+        });
+        if (dbUser) {
+          dbUserId = dbUser.id;
+        }
+      } catch (err) {
+        console.error('Error resolving user from DB:', err);
+      }
+
       // Ensure the room exists in the database so that relation constraints (like WatchSession) succeed
       try {
         const roomExists = await prisma.room.findUnique({
           where: { id: roomId }
         });
         if (!roomExists) {
-          const hostUser = await prisma.user.findFirst({
-            where: {
-              OR: [
-                { id: userId },
-                { email: userId }
-              ]
-            }
-          });
-          const actualHostId = hostUser ? hostUser.id : userId;
-          
-          let finalHostId = actualHostId;
-          if (!hostUser) {
+          let finalHostId = dbUserId;
+          if (!finalHostId) {
             const anyUser = await prisma.user.findFirst();
             if (anyUser) {
               finalHostId = anyUser.id;
@@ -57,9 +65,15 @@ export function setupRoomSockets(io: SocketIOServer) {
             }
           });
           console.log(`🏠 Auto-created Room record in DB for room ID: ${roomId} with Host: ${finalHostId}`);
+        } else {
+          // If room already exists, make sure it is marked active
+          await prisma.room.update({
+            where: { id: roomId },
+            data: { isActive: true }
+          }).catch(() => {});
         }
       } catch (err) {
-        console.error('Error auto-creating Room record:', err);
+        console.error('Error auto-creating/activating Room record:', err);
       }
       
       // Store socket to userId mapping for disconnects
@@ -69,6 +83,35 @@ export function setupRoomSockets(io: SocketIOServer) {
       (socket as any).userImage = userImage;
 
       await redisService.addParticipant(roomId, userId);
+
+      // Save user join/visit history in DB if valid user
+      if (dbUserId) {
+        // Log/update room visit
+        await prisma.roomVisit.upsert({
+          where: {
+            userId_roomId: { userId: dbUserId, roomId }
+          },
+          update: { visitedAt: new Date() },
+          create: { userId: dbUserId, roomId }
+        }).catch(err => console.error('Error logging RoomVisit:', err));
+
+        // Add to active RoomParticipant DB table
+        await prisma.roomParticipant.upsert({
+          where: {
+            roomId_userId: { roomId, userId: dbUserId }
+          },
+          update: { joinedAt: new Date() },
+          create: { roomId, userId: dbUserId }
+        }).catch(err => console.error('Error mapping RoomParticipant:', err));
+
+        // Clean up visits older than 24 hours
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        await prisma.roomVisit.deleteMany({
+          where: {
+            visitedAt: { lt: oneDayAgo }
+          }
+        }).catch(err => console.error('Error clearing old RoomVisits:', err));
+      }
 
       // Notify all room members
       socket.to(roomId).emit('user-joined', { userId, userName, userImage });
@@ -95,12 +138,31 @@ export function setupRoomSockets(io: SocketIOServer) {
 
       socket.leave(roomId);
       await redisService.removeParticipant(roomId, userId);
+
+      // Remove from active RoomParticipant DB table
+      try {
+        const dbUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { id: userId },
+              { email: userId }
+            ]
+          }
+        });
+        if (dbUser) {
+          await prisma.roomParticipant.deleteMany({
+            where: { roomId, userId: dbUser.id }
+          });
+        }
+      } catch (err) {
+        console.error('Error removing RoomParticipant on leave-room:', err);
+      }
+
       socket.to(roomId).emit('user-left', { userId });
       
-      // Auto Cleanup if room is empty (simplified for MVP)
+      // Auto Cleanup if room is empty
       const participants = await redisService.getParticipants(roomId);
       if (participants.length === 0) {
-        // In full scale, this would be a 5-minute delayed job
         await redisService.deleteRoomState(roomId);
         await prisma.room.update({
           where: { id: roomId },
@@ -132,6 +194,26 @@ export function setupRoomSockets(io: SocketIOServer) {
       
       if (userId && roomId) {
         await redisService.removeParticipant(roomId, userId);
+
+        // Remove from active RoomParticipant DB table
+        try {
+          const dbUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { id: userId },
+                { email: userId }
+              ]
+            }
+          });
+          if (dbUser) {
+            await prisma.roomParticipant.deleteMany({
+              where: { roomId, userId: dbUser.id }
+            });
+          }
+        } catch (err) {
+          console.error('Error removing RoomParticipant on disconnect:', err);
+        }
+
         io.to(roomId).emit('user-left', { userId });
         
         const participants = await redisService.getParticipants(roomId);
